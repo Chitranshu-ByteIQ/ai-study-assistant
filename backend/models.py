@@ -130,7 +130,7 @@ class MemoryCreateRequest(BaseModel):
     key: str = Field(
         ...,
         min_length=1,
-        description="Stable fact name. Reusing it updates the existing memory for this user.",
+        description="Stable fact name. Reusing it updates the existing global memory.",
         examples=["preferred_explanation_style"],
     )
     value: str = Field(
@@ -149,7 +149,6 @@ class MemoryCreateRequest(BaseModel):
 class MemoryResponse(BaseModel):
 
     id: str = Field(description="Unique persistent memory identifier.")
-    user_id: str = Field(description="User identifier supplied through X-User-ID.")
     key: str = Field(description="Stable memory key.", examples=["name"])
     value: str = Field(description="Stored durable fact.", examples=["Chitranshu"])
     category: MemoryCategory = Field(description="Memory classification.")

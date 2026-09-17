@@ -44,8 +44,6 @@ class AgentState(TypedDict):
 
     iteration: int
 
-    user_id: str | None
-
     memory_context: str
 
 
@@ -233,11 +231,6 @@ tool_node = ToolNode(tools)
 
 def memory_node(state: AgentState):
     """Persist explicit durable facts after a completed agent turn."""
-    user_id = state.get("user_id")
-
-    if not user_id:
-        return {}
-
     user_messages = [
         message
         for message in state["messages"]
@@ -245,7 +238,7 @@ def memory_node(state: AgentState):
     ]
 
     if user_messages:
-        store_extracted_memories(user_id, str(user_messages[-1].content))
+        store_extracted_memories(str(user_messages[-1].content))
 
     return {}
 

@@ -1,7 +1,6 @@
 import logging
-from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.long_term_memory import delete_memory, get_memories, upsert_memory
 from backend.models import (
@@ -14,27 +13,17 @@ from backend.models import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory", tags=["Long-Term Memory"])
-UserIdHeader = Annotated[
-    str,
-    Header(
-        alias="X-User-ID",
-        description="Stable client-generated user identifier. It scopes memories across threads.",
-        examples=["8b3bc0e8-2e24-4ec2-9fdd-3fb667e2254a"],
-    ),
-]
-
-
 @router.post(
     "",
     response_model=MemoryResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create or update a long-term memory",
-    description="Stores one durable fact for the user identified by `X-User-ID`. Reusing a key updates that memory instead of creating a duplicate.",
+    description="Stores one durable fact globally. Reusing a key updates that memory instead of creating a duplicate.",
     responses={400: {"description": "Invalid memory data"}},
 )
-async def create_memory(request: MemoryCreateRequest, user_id: UserIdHeader):
+async def create_memory(request: MemoryCreateRequest):
     try:
-        return upsert_memory(user_id, request.key, request.value, request.category)
+        return upsert_memory(request.key, request.value, request.category)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception:
@@ -46,14 +35,13 @@ async def create_memory(request: MemoryCreateRequest, user_id: UserIdHeader):
     "",
     response_model=list[MemoryResponse],
     summary="List long-term memories",
-    description="Returns durable memories for the `X-User-ID` user. These are independent of individual chat threads.",
+    description="Returns all durable memories shared across chat threads.",
 )
 async def list_memory(
-    user_id: UserIdHeader,
     category: MemoryCategory | None = Query(default=None, description="Optional memory category filter."),
 ):
     try:
-        return get_memories(user_id, category)
+        return get_memories(category)
     except Exception:
         logger.exception("Memory API list failed")
         raise HTTPException(status_code=500, detail="Unable to retrieve memories")
@@ -63,15 +51,14 @@ async def list_memory(
     "/{memory_id}",
     response_model=MemoryDeleteResponse,
     summary="Forget one long-term memory",
-    description="Permanently removes one memory belonging to the `X-User-ID` user.",
+    description="Permanently removes one global memory.",
     responses={404: {"description": "Memory not found"}},
 )
 async def remove_memory(
-    memory_id: Annotated[str, "Unique identifier of the memory to remove."],
-    user_id: UserIdHeader,
+    memory_id: str,
 ):
     try:
-        if not delete_memory(memory_id, user_id):
+        if not delete_memory(memory_id):
             raise HTTPException(status_code=404, detail="Memory not found")
         return {"message": "Memory forgotten", "memory_id": memory_id}
     except HTTPException:

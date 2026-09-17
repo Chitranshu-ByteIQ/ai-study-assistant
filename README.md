@@ -26,8 +26,8 @@ Streamlit UI / API client
 ```
 
 Conversation history is stored per thread in `chat_history.db`. Long-term memory
-is separate: it is keyed by a client-provided `X-User-ID`, so the same user can
-start a new thread without losing durable context.
+is separate and global for this single-user application, so a new thread can
+use durable context from earlier threads.
 
 ## Requirements
 
@@ -65,15 +65,10 @@ The frontend expects FastAPI at `http://127.0.0.1:8000`.
 | Reminders | `POST/GET /reminders`, `GET/PATCH/DELETE /reminders/{reminder_id}`, `POST /reminders/{reminder_id}/complete` |
 | Memory | `POST/GET /memory`, `DELETE /memory/{memory_id}` |
 
-Memory endpoints require an `X-User-ID` header. The Streamlit app generates and
-keeps one ID for its browser session. Other API clients should send a stable ID
-for every memory-aware chat and memory request.
-
 Example manual memory creation:
 
 ```powershell
 Invoke-RestMethod -Method Post http://127.0.0.1:8000/memory `
-  -Headers @{ 'X-User-ID' = 'my-user-id' } `
   -ContentType 'application/json' `
   -Body '{"key":"name","value":"Chitranshu","category":"profile"}'
 ```
@@ -87,15 +82,14 @@ The graph's memory node extracts only explicit durable statements, such as:
 - `I'm currently learning LangGraph.`
 - `I'm preparing for a LangChain interview.`
 
-Memories are upserted by `(user_id, key)`, preventing duplicate records. On a
-later message, only memories relevant to the current question are injected into
-the agent prompt. Users can inspect and forget them via the Memory page or API.
+Memories are upserted by a global `key`, preventing duplicate records. On a
+later message, only relevant global memories are injected into the agent prompt.
+Users can inspect and forget them via the Memory page or API.
 
 ## Limitations
 
-- Long-term identity is client-managed; there is no authentication system.
-- Memory extraction currently uses explicit deterministic patterns rather than
-  a general-purpose structured extraction model.
+- Memory extraction is focused on explicit durable facts and uses a conservative
+  fallback if the structured extractor is unavailable.
 - Reminder status becomes overdue when read; no background notification service
   or recurrence engine is included.
 

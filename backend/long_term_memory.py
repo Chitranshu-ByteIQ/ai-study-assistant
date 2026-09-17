@@ -1,10 +1,13 @@
 import logging
+import json
 import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 logger = logging.getLogger(__name__)
@@ -27,36 +30,68 @@ def _now() -> str:
 def _row_to_memory(row: tuple) -> dict:
     return {
         "id": row[0],
-        "user_id": row[1],
-        "key": row[2],
-        "value": row[3],
-        "category": row[4],
-        "created_at": row[5],
-        "updated_at": row[6],
+        "key": row[1],
+        "value": row[2],
+        "category": row[3],
+        "created_at": row[4],
+        "updated_at": row[5],
     }
 
 
 def init_long_term_memory_db() -> None:
     conn = get_connection()
     try:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(memories)").fetchall()
+        }
+
+        if columns and "user_id" in columns:
+            conn.execute(
+                """
+                CREATE TABLE memories_global (
+                    id TEXT PRIMARY KEY,
+                    key TEXT NOT NULL UNIQUE,
+                    value TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO memories_global (id, key, value, category, created_at, updated_at)
+                SELECT id, key, value, category, created_at, updated_at
+                FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY key ORDER BY updated_at DESC, rowid DESC
+                    ) AS row_number
+                    FROM memories
+                )
+                WHERE row_number = 1
+                """
+            )
+            conn.execute("DROP TABLE memories")
+            conn.execute("ALTER TABLE memories_global RENAME TO memories")
+
+        conn.execute("DROP INDEX IF EXISTS idx_memories_user_category")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                key TEXT NOT NULL,
+                key TEXT NOT NULL UNIQUE,
                 value TEXT NOT NULL,
                 category TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE (user_id, key)
+                updated_at TEXT NOT NULL
             )
             """
         )
         conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_memories_user_category
-            ON memories (user_id, category)
+            CREATE INDEX IF NOT EXISTS idx_memories_category
+            ON memories (category)
             """
         )
         conn.commit()
@@ -69,7 +104,6 @@ def init_long_term_memory_db() -> None:
 
 
 def upsert_memory(
-    user_id: str,
     key: str,
     value: str,
     category: MemoryCategory,
@@ -77,12 +111,11 @@ def upsert_memory(
     if category not in VALID_CATEGORIES:
         raise ValueError("category is invalid")
 
-    clean_user_id = user_id.strip()
     clean_key = key.strip().lower().replace(" ", "_")
     clean_value = value.strip()
 
-    if not clean_user_id or not clean_key or not clean_value:
-        raise ValueError("user_id, key, and value are required")
+    if not clean_key or not clean_value:
+        raise ValueError("key and value are required")
 
     timestamp = _now()
     memory_id = str(uuid.uuid4())
@@ -90,35 +123,34 @@ def upsert_memory(
     try:
         conn.execute(
             """
-            INSERT INTO memories (id, user_id, key, value, category, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id, key) DO UPDATE SET
+            INSERT INTO memories (id, key, value, category, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
                 value = excluded.value,
                 category = excluded.category,
                 updated_at = excluded.updated_at
             """,
-            (memory_id, clean_user_id, clean_key, clean_value, category, timestamp, timestamp),
+            (memory_id, clean_key, clean_value, category, timestamp, timestamp),
         )
         conn.commit()
         row = conn.execute(
             """
-            SELECT id, user_id, key, value, category, created_at, updated_at
-            FROM memories WHERE user_id = ? AND key = ?
+            SELECT id, key, value, category, created_at, updated_at
+            FROM memories WHERE key = ?
             """,
-            (clean_user_id, clean_key),
+            (clean_key,),
         ).fetchone()
-        logger.info("Memory upserted: user_id=%s key=%s category=%s", clean_user_id, clean_key, category)
+        logger.info("Memory upserted: key=%s category=%s", clean_key, category)
         return _row_to_memory(row)
     except sqlite3.Error:
         conn.rollback()
-        logger.exception("Failed to upsert memory: user_id=%s key=%s", clean_user_id, clean_key)
+        logger.exception("Failed to upsert memory: key=%s", clean_key)
         raise
     finally:
         conn.close()
 
 
 def get_memories(
-    user_id: str,
     category: MemoryCategory | None = None,
 ) -> list[dict]:
     conn = get_connection()
@@ -126,55 +158,54 @@ def get_memories(
         if category is None:
             rows = conn.execute(
                 """
-                SELECT id, user_id, key, value, category, created_at, updated_at
-                FROM memories WHERE user_id = ? ORDER BY updated_at DESC
+                SELECT id, key, value, category, created_at, updated_at
+                FROM memories ORDER BY updated_at DESC
                 """,
-                (user_id,),
             ).fetchall()
         else:
             rows = conn.execute(
                 """
-                SELECT id, user_id, key, value, category, created_at, updated_at
-                FROM memories WHERE user_id = ? AND category = ? ORDER BY updated_at DESC
+                SELECT id, key, value, category, created_at, updated_at
+                FROM memories WHERE category = ? ORDER BY updated_at DESC
                 """,
-                (user_id, category),
+                (category,),
             ).fetchall()
-        logger.info("Memories retrieved: user_id=%s category=%s count=%s", user_id, category, len(rows))
+        logger.info("Memories retrieved: category=%s count=%s", category, len(rows))
         return [_row_to_memory(row) for row in rows]
     except sqlite3.Error:
-        logger.exception("Failed to retrieve memories: user_id=%s", user_id)
+        logger.exception("Failed to retrieve memories")
         raise
     finally:
         conn.close()
 
 
-def get_memory(memory_id: str, user_id: str) -> dict | None:
+def get_memory(memory_id: str) -> dict | None:
     conn = get_connection()
     try:
         row = conn.execute(
             """
-            SELECT id, user_id, key, value, category, created_at, updated_at
-            FROM memories WHERE id = ? AND user_id = ?
+            SELECT id, key, value, category, created_at, updated_at
+            FROM memories WHERE id = ?
             """,
-            (memory_id, user_id),
+            (memory_id,),
         ).fetchone()
         return _row_to_memory(row) if row else None
     finally:
         conn.close()
 
 
-def delete_memory(memory_id: str, user_id: str) -> bool:
+def delete_memory(memory_id: str) -> bool:
     conn = get_connection()
     try:
         cursor = conn.execute(
-            "DELETE FROM memories WHERE id = ? AND user_id = ?",
-            (memory_id, user_id),
+            "DELETE FROM memories WHERE id = ?",
+            (memory_id,),
         )
         conn.commit()
         if cursor.rowcount:
-            logger.info("Memory forgotten: memory_id=%s user_id=%s", memory_id, user_id)
+            logger.info("Memory forgotten: memory_id=%s", memory_id)
             return True
-        logger.warning("Memory not found: memory_id=%s user_id=%s", memory_id, user_id)
+        logger.warning("Memory not found: memory_id=%s", memory_id)
         return False
     except sqlite3.Error:
         conn.rollback()
@@ -184,12 +215,25 @@ def delete_memory(memory_id: str, user_id: str) -> bool:
         conn.close()
 
 
-def extract_memories(message: str) -> list[tuple[str, str, MemoryCategory]]:
-    """Extract only explicit, durable profile and study facts from one user turn."""
+class MemoryAction(BaseModel):
+    action: Literal["upsert", "delete"]
+    key: str = Field(min_length=1)
+    value: str | None = None
+    category: MemoryCategory = "context"
+
+
+class MemoryExtraction(BaseModel):
+    actions: list[MemoryAction] = Field(default_factory=list)
+
+
+def _fallback_extract_memories(message: str) -> list[MemoryAction]:
+    """Keep explicit durable facts usable if the extractor is unavailable."""
     text = message.strip()
     patterns = [
-        (r"\bmy name is\s+([^.!?]+)", "name", "profile"),
-        (r"\bcall me\s+([^.!?]+)", "name", "profile"),
+        (r"\bmy name is\s+([A-Za-z][^.!?]*?)(?=\s+and\s+i(?:'m| am)\b|[.!?]|$)", "name", "profile"),
+        (r"\bcall me\s+([A-Za-z][^.!?]*?)(?=\s+and\s+i(?:'m| am)\b|[.!?]|$)", "name", "profile"),
+        (r"\bi am\s+(\d{1,3})\s+years? old\b", "age", "profile"),
+        (r"\bi['’]?m\s+(\d{1,3})\s+years? old\b", "age", "profile"),
         (r"\bi (?:prefer|like)\s+([^.!?]+)", "preference", "preference"),
         (r"\bi(?: am|'m) currently learning\s+([^.!?]+)", "current_learning_focus", "learning"),
         (r"\bi(?: am|'m) learning\s+([^.!?]+)", "current_learning_focus", "learning"),
@@ -202,24 +246,64 @@ def extract_memories(message: str) -> list[tuple[str, str, MemoryCategory]]:
         if match:
             value = match.group(1).strip(" ,")
             if value:
-                extracted.append((key, value, category))
+                extracted.append(MemoryAction(action="upsert", key=key, value=value, category=category))
     return extracted
 
 
-def store_extracted_memories(user_id: str, message: str) -> list[dict]:
-    extracted = extract_memories(message)
-    if not extracted:
-        logger.info("Memory extraction skipped: user_id=%s", user_id)
-        return []
-    memories = [upsert_memory(user_id, key, value, category) for key, value, category in extracted]
-    logger.info("Memory extraction completed: user_id=%s count=%s", user_id, len(memories))
+def _extract_memory_actions(message: str, existing: list[dict]) -> list[MemoryAction]:
+    from langchain_groq import ChatGroq
+
+    from backend.config import settings
+
+    extractor = ChatGroq(
+        model=settings.groq_model,
+        api_key=settings.groq_api_key,
+        temperature=0,
+    ).with_structured_output(MemoryExtraction)
+    existing_context = json.dumps(
+        [{"key": item["key"], "value": item["value"], "category": item["category"]} for item in existing],
+        separators=(",", ":"),
+    )
+    prompt = (
+        "Extract only explicit durable user facts from the latest message. "
+        "Ignore questions, tasks, course content, and casual statements. "
+        "Use stable canonical keys so changed facts update existing entries. "
+        "Return upsert for new or changed facts, delete only when the user clearly retracts a fact. "
+        "Return no actions for irrelevant text. Existing global memories: "
+        f"{existing_context}\nLatest user message: {message}"
+    )
+    result = extractor.invoke(prompt)
+    return result.actions
+
+
+def store_extracted_memories(message: str) -> list[dict]:
+    existing = get_memories()
+    try:
+        actions = _extract_memory_actions(message, existing)
+    except Exception:
+        logger.exception("Memory extraction failed; using explicit fallback")
+        actions = _fallback_extract_memories(message)
+
+    memories = []
+    for action in actions:
+        key = action.key.strip().lower().replace(" ", "_")
+        if action.action == "delete":
+            if delete_memory_by_key(key):
+                continue
+        if action.value and action.value.strip():
+            memories.append(upsert_memory(key, action.value, action.category))
+    logger.info("Memory extraction completed: count=%s", len(memories))
     return memories
 
 
-def get_relevant_memories(user_id: str, query: str) -> list[dict]:
-    memories = get_memories(user_id)
+def get_relevant_memories(query: str) -> list[dict]:
+    memories = get_memories()
     normalized_query = query.lower()
-    if "remember" in normalized_query or "about me" in normalized_query:
+    if (
+        "remember" in normalized_query
+        or "about me" in normalized_query
+        or re.search(r"\b(my|me|i|i'm|am i)\b", normalized_query)
+    ):
         return memories
     query_words = {word for word in re.findall(r"[a-z0-9_]+", normalized_query) if len(word) > 2}
     relevant = []
@@ -230,8 +314,22 @@ def get_relevant_memories(user_id: str, query: str) -> list[dict]:
     return relevant
 
 
+def delete_memory_by_key(key: str) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM memories WHERE key = ?", (key,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except sqlite3.Error:
+        conn.rollback()
+        logger.exception("Failed to delete memory by key: key=%s", key)
+        raise
+    finally:
+        conn.close()
+
+
 def format_memory_context(memories: list[dict]) -> str:
     if not memories:
         return ""
     entries = "\n".join(f"- {item['key']}: {item['value']} ({item['category']})" for item in memories)
-    return f"Relevant long-term memory for this user:\n{entries}"
+    return f"Relevant global long-term memory:\n{entries}"

@@ -1,6 +1,4 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from backend.models import (
     ChatRequest,
@@ -34,15 +32,6 @@ router = APIRouter(
     prefix="/chat",
     tags=["Chat"],
 )
-
-UserIdHeader = Annotated[
-    str | None,
-    Header(
-        alias="X-User-ID",
-        description="Optional stable user identifier used for cross-thread long-term memory.",
-    ),
-]
-
 
 # ============================================================
 # CREATE NEW THREAD
@@ -155,12 +144,11 @@ async def remove_thread(
     "/",
     response_model=ChatResponse,
     summary="Send a message to a chat thread",
-    description="Loads thread history, adds relevant long-term memory for X-User-ID, then invokes the LangGraph agent.",
+    description="Loads thread history, adds relevant global long-term memory, then invokes the LangGraph agent.",
     responses={404: {"description": "Conversation not found"}},
 )
 async def chat(
     request: ChatRequest,
-    user_id: UserIdHeader = None,
 ):
 
     try:
@@ -189,10 +177,9 @@ async def chat(
         )
 
         memory_context = ""
-        if user_id:
-            memory_context = format_memory_context(
-                get_relevant_memories(user_id, request.message)
-            )
+        memory_context = format_memory_context(
+            get_relevant_memories(request.message)
+        )
 
         # ----------------------------------------------------
         # Add current user message
@@ -218,7 +205,6 @@ async def chat(
                 {
                     "messages": messages,
                     "iteration": 0,
-                    "user_id": user_id,
                     "memory_context": memory_context,
                 }
             )

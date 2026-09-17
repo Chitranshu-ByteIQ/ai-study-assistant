@@ -1,5 +1,4 @@
 from datetime import datetime
-import uuid
 
 import requests
 import streamlit as st
@@ -9,20 +8,13 @@ API_URL = "http://127.0.0.1:8000"
 
 st.set_page_config(page_title="AI Study Assistant", page_icon="📚", layout="wide")
 
-if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4())
 if "current_conversation_id" not in st.session_state:
     st.session_state.current_conversation_id = None
 if "page" not in st.session_state:
     st.session_state.page = "💬 Chat"
 
 
-def headers() -> dict:
-    return {"X-User-ID": st.session_state.user_id}
-
-
 def request_api(method: str, path: str, **kwargs):
-    kwargs.setdefault("headers", headers())
     kwargs.setdefault("timeout", 120)
     return requests.request(method, f"{API_URL}{path}", **kwargs)
 
@@ -142,7 +134,7 @@ with st.sidebar:
         index=["🧠 Memory", "🔔 Reminders", "💬 Chat"].index(st.session_state.page),
         label_visibility="collapsed",
     )
-    st.caption("Memories are scoped to this browser session's user ID.")
+    st.caption("Memories are shared across all conversations.")
 
 if backend_error:
     st.warning("The backend is unavailable. Start FastAPI at http://127.0.0.1:8000.")
