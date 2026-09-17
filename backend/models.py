@@ -1,6 +1,10 @@
 from pydantic import BaseModel, Field
 
 
+# ============================================================
+# CHAT
+# ============================================================
+
 class ChatRequest(BaseModel):
 
     message: str = Field(
@@ -9,7 +13,7 @@ class ChatRequest(BaseModel):
         description="Student's question",
     )
 
-    conversation_id: str = "default"
+    conversation_id: str
 
 
 class ChatResponse(BaseModel):
@@ -21,3 +25,32 @@ class ChatResponse(BaseModel):
     tool_used: str | None = None
 
     sources: list[str] = []
+
+
+# ============================================================
+# THREAD
+# ============================================================
+
+class ThreadCreateRequest(BaseModel):
+
+    title: str = "New Chat"
+
+
+class ThreadResponse(BaseModel):
+
+    conversation_id: str
+
+    title: str
+
+    created_at: str
+
+
+class MessageResponse(BaseModel):
+
+    id: int
+
+    role: str
+
+    content: str
+
+    created_at: str

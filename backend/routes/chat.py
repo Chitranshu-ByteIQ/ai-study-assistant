@@ -3,13 +3,21 @@ from fastapi import APIRouter, HTTPException
 from backend.models import (
     ChatRequest,
     ChatResponse,
+    ThreadCreateRequest,
+    ThreadResponse,
+    MessageResponse,
 )
 
 from backend.agent import graph
 
 from backend.memory import (
+    create_thread,
+    get_threads,
+    get_thread,
     get_history,
+    get_messages,
     save_message,
+    delete_thread,
 )
 
 
@@ -18,6 +26,106 @@ router = APIRouter(
     tags=["Chat"],
 )
 
+
+# ============================================================
+# CREATE NEW THREAD
+# ============================================================
+
+@router.post(
+    "/threads",
+    response_model=ThreadResponse,
+)
+async def create_new_thread(
+    request: ThreadCreateRequest,
+):
+
+    conversation_id = create_thread(
+        title=request.title
+    )
+
+    thread = get_thread(
+        conversation_id
+    )
+
+    return thread
+
+
+# ============================================================
+# GET ALL THREADS
+# ============================================================
+
+@router.get(
+    "/threads",
+    response_model=list[ThreadResponse],
+)
+async def list_threads():
+
+    return get_threads()
+
+
+# ============================================================
+# GET / RESUME THREAD
+# ============================================================
+
+@router.get(
+    "/threads/{conversation_id}",
+)
+async def resume_thread(
+    conversation_id: str,
+):
+
+    thread = get_thread(
+        conversation_id
+    )
+
+    if not thread:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found",
+        )
+
+    messages = get_messages(
+        conversation_id
+    )
+
+    return {
+        "thread": thread,
+        "messages": messages,
+    }
+
+
+# ============================================================
+# DELETE THREAD
+# ============================================================
+
+@router.delete(
+    "/threads/{conversation_id}",
+)
+async def remove_thread(
+    conversation_id: str,
+):
+
+    deleted = delete_thread(
+        conversation_id
+    )
+
+    if not deleted:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found",
+        )
+
+    return {
+        "message": "Conversation deleted",
+        "conversation_id": conversation_id,
+    }
+
+
+# ============================================================
+# CHAT
+# ============================================================
 
 @router.post(
     "/",
@@ -30,16 +138,30 @@ async def chat(
     try:
 
         # ----------------------------------------------------
-        # Load SQLite conversation
+        # Check whether conversation exists
+        # ----------------------------------------------------
+
+        thread = get_thread(
+            request.conversation_id
+        )
+
+        if not thread:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found",
+            )
+
+        # ----------------------------------------------------
+        # Load previous conversation
         # ----------------------------------------------------
 
         history = get_history(
             request.conversation_id
         )
 
-
         # ----------------------------------------------------
-        # Add current question
+        # Add current user message
         # ----------------------------------------------------
 
         messages = history + [
@@ -48,7 +170,6 @@ async def chat(
                 "content": request.message,
             }
         ]
-
 
         # ----------------------------------------------------
         # Run LangGraph
@@ -61,17 +182,13 @@ async def chat(
             }
         )
 
-
         # ----------------------------------------------------
-        # Get final message
+        # Get final response
         # ----------------------------------------------------
 
-        final_message = (
-            result["messages"][-1]
-        )
+        final_message = result["messages"][-1]
 
         response = final_message.content
-
 
         # ----------------------------------------------------
         # Detect tool usage
@@ -80,17 +197,12 @@ async def chat(
         tool_used = None
         sources = []
 
-
         for message in result["messages"]:
 
             if message.type == "tool":
 
-                tool_used = (
-                    message.name
-                )
+                tool_used = message.name
 
-
-                # Try to extract sources
                 content = message.content
 
                 if "Source:" in content:
@@ -108,44 +220,47 @@ async def chat(
                         )
 
                         if source:
+
                             sources.append(
                                 source
                             )
 
-
         # ----------------------------------------------------
-        # Save conversation
+        # Save user message
         # ----------------------------------------------------
 
         save_message(
-            conversation_id=(
-                request.conversation_id
-            ),
+            conversation_id=request.conversation_id,
             role="user",
             content=request.message,
         )
 
+        # ----------------------------------------------------
+        # Save assistant response
+        # ----------------------------------------------------
 
         save_message(
-            conversation_id=(
-                request.conversation_id
-            ),
+            conversation_id=request.conversation_id,
             role="assistant",
             content=response,
         )
 
+        # ----------------------------------------------------
+        # Return response
+        # ----------------------------------------------------
 
         return ChatResponse(
             response=response,
-            conversation_id=(
-                request.conversation_id
-            ),
+            conversation_id=request.conversation_id,
             tool_used=tool_used,
             sources=list(
                 dict.fromkeys(sources)
             ),
         )
 
+    except HTTPException:
+
+        raise
 
     except Exception as e:
 

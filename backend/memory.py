@@ -1,5 +1,5 @@
 import sqlite3
-
+import uuid
 from pathlib import Path
 
 from langchain_core.messages import (
@@ -8,7 +8,21 @@ from langchain_core.messages import (
 )
 
 
-DB_PATH = Path("chat_history.db")
+# ============================================================
+# DATABASE PATH
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+DB_PATH = BASE_DIR / "chat_history.db"
+
+
+# ============================================================
+# DATABASE CONNECTION
+# ============================================================
+
+def get_connection():
+    return sqlite3.connect(DB_PATH)
 
 
 # ============================================================
@@ -17,9 +31,26 @@ DB_PATH = Path("chat_history.db")
 
 def init_db():
 
-    conn = sqlite3.connect(DB_PATH)
-
+    conn = get_connection()
     cursor = conn.cursor()
+
+    # --------------------------------------------------------
+    # Threads table
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS threads (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    # --------------------------------------------------------
+    # Messages table
+    # --------------------------------------------------------
 
     cursor.execute(
         """
@@ -28,13 +59,107 @@ def init_db():
             conversation_id TEXT NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+            FOREIGN KEY (conversation_id)
+            REFERENCES threads(id)
         )
         """
     )
 
     conn.commit()
     conn.close()
+
+
+# ============================================================
+# CREATE THREAD
+# ============================================================
+
+def create_thread(title: str = "New Chat"):
+
+    conversation_id = str(uuid.uuid4())
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO threads (id, title)
+        VALUES (?, ?)
+        """,
+        (
+            conversation_id,
+            title,
+        ),
+    )
+
+    conn.commit()
+    conn.close()
+
+    return conversation_id
+
+
+# ============================================================
+# GET ALL THREADS
+# ============================================================
+
+def get_threads():
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, title, created_at
+        FROM threads
+        ORDER BY created_at DESC
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return [
+        {
+            "conversation_id": row[0],
+            "title": row[1],
+            "created_at": row[2],
+        }
+        for row in rows
+    ]
+
+
+# ============================================================
+# GET SINGLE THREAD
+# ============================================================
+
+def get_thread(conversation_id: str):
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, title, created_at
+        FROM threads
+        WHERE id = ?
+        """,
+        (conversation_id,),
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "conversation_id": row[0],
+        "title": row[1],
+        "created_at": row[2],
+    }
 
 
 # ============================================================
@@ -47,14 +172,17 @@ def save_message(
     content: str,
 ):
 
-    conn = sqlite3.connect(DB_PATH)
-
+    conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
         INSERT INTO messages
-        (conversation_id, role, content)
+        (
+            conversation_id,
+            role,
+            content
+        )
         VALUES (?, ?, ?)
         """,
         (
@@ -69,15 +197,14 @@ def save_message(
 
 
 # ============================================================
-# GET CONVERSATION
+# GET CONVERSATION HISTORY
 # ============================================================
 
 def get_history(
     conversation_id: str,
 ):
 
-    conn = sqlite3.connect(DB_PATH)
-
+    conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
@@ -118,7 +245,77 @@ def get_history(
 
 
 # ============================================================
-# INITIALIZE
+# GET RAW MESSAGES
+# ============================================================
+
+def get_messages(conversation_id: str):
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, role, content, created_at
+        FROM messages
+        WHERE conversation_id = ?
+        ORDER BY id
+        """,
+        (conversation_id,),
+    )
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "role": row[1],
+            "content": row[2],
+            "created_at": row[3],
+        }
+        for row in rows
+    ]
+
+
+# ============================================================
+# DELETE THREAD
+# ============================================================
+
+def delete_thread(conversation_id: str):
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Delete messages first
+    cursor.execute(
+        """
+        DELETE FROM messages
+        WHERE conversation_id = ?
+        """,
+        (conversation_id,),
+    )
+
+    # Delete thread
+    cursor.execute(
+        """
+        DELETE FROM threads
+        WHERE id = ?
+        """,
+        (conversation_id,),
+    )
+
+    conn.commit()
+
+    deleted = cursor.rowcount
+
+    conn.close()
+
+    return deleted > 0
+
+
+# ============================================================
+# INITIALIZE DATABASE
 # ============================================================
 
 init_db()
