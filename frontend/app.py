@@ -1,7 +1,6 @@
 import uuid
 
 import requests
-
 import streamlit as st
 
 
@@ -9,9 +8,7 @@ import streamlit as st
 # CONFIG
 # ============================================================
 
-API_URL = (
-    "http://127.0.0.1:8000/chat/"
-)
+API_URL = "http://127.0.0.1:8000"
 
 
 # ============================================================
@@ -26,23 +23,74 @@ st.set_page_config(
 
 
 # ============================================================
-# SESSION ID
+# SESSION STATE
 # ============================================================
 
-if "conversation_id" not in st.session_state:
+# All chat threads known to the frontend
+if "chat_threads" not in st.session_state:
+    st.session_state.chat_threads = {}
 
-    st.session_state.conversation_id = str(
-        uuid.uuid4()
+
+# Current active conversation
+if "current_conversation_id" not in st.session_state:
+    conversation_id = str(uuid.uuid4())
+
+    st.session_state.current_conversation_id = conversation_id
+
+    st.session_state.chat_threads[conversation_id] = {
+        "title": "New Chat",
+    }
+
+
+# Current page
+if "page" not in st.session_state:
+    st.session_state.page = "💬 Chat"
+
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
+
+def create_new_chat():
+    """
+    Create a new conversation/thread.
+    """
+
+    conversation_id = str(uuid.uuid4())
+
+    st.session_state.chat_threads[conversation_id] = {
+        "title": "New Chat",
+    }
+
+    st.session_state.current_conversation_id = conversation_id
+
+
+def get_current_conversation_id():
+    """
+    Return the active LangGraph thread ID.
+    """
+
+    return st.session_state.current_conversation_id
+
+
+def send_message(message: str):
+    """
+    Send the user's message to FastAPI.
+    """
+
+    conversation_id = get_current_conversation_id()
+
+    response = requests.post(
+        f"{API_URL}/chat/",
+        json={
+            "message": message,
+            "conversation_id": conversation_id,
+        },
+        timeout=120,
     )
 
-
-# ============================================================
-# CHAT HISTORY
-# ============================================================
-
-if "messages" not in st.session_state:
-
-    st.session_state.messages = []
+    return response
 
 
 # ============================================================
@@ -55,28 +103,94 @@ with st.sidebar:
 
     st.divider()
 
-    st.markdown(
-        "### Navigation"
-    )
+    # --------------------------------------------------------
+    # NEW CHAT
+    # --------------------------------------------------------
+
+    if st.button(
+        "➕ New Chat",
+        use_container_width=True,
+    ):
+
+        create_new_chat()
+
+        st.rerun()
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # CHAT THREADS
+    # --------------------------------------------------------
+
+    st.markdown("### 💬 Conversations")
+
+    if st.session_state.chat_threads:
+
+        for conversation_id, chat in list(
+            st.session_state.chat_threads.items()
+        ):
+
+            title = chat.get(
+                "title",
+                "New Chat",
+            )
+
+            is_current = (
+                conversation_id
+                == st.session_state.current_conversation_id
+            )
+
+            button_label = (
+                f"🟢 {title}"
+                if is_current
+                else f"💬 {title}"
+            )
+
+            if st.button(
+                button_label,
+                key=f"chat_{conversation_id}",
+                use_container_width=True,
+            ):
+
+                st.session_state.current_conversation_id = (
+                    conversation_id
+                )
+
+                st.session_state.page = "💬 Chat"
+
+                st.rerun()
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # NAVIGATION
+    # --------------------------------------------------------
+
+    st.markdown("### Navigation")
 
     page = st.radio(
-        "",
+        "Navigation",
         [
             "💬 Chat",
             "📖 Course Material",
             "⏰ Reminders",
             "🧠 Memory",
         ],
+        label_visibility="collapsed",
     )
+
+    st.session_state.page = page
 
     st.divider()
 
-    st.markdown(
-        "### Session"
-    )
+    # --------------------------------------------------------
+    # CURRENT THREAD
+    # --------------------------------------------------------
+
+    st.markdown("### Current Thread")
 
     st.caption(
-        st.session_state.conversation_id
+        st.session_state.current_conversation_id
     )
 
 
@@ -84,22 +198,50 @@ with st.sidebar:
 # CHAT PAGE
 # ============================================================
 
-if page == "💬 Chat":
+if st.session_state.page == "💬 Chat":
 
-    st.title(
-        "AI Study Assistant"
-    )
+    st.title("AI Study Assistant")
 
     st.caption(
         "Your personal course & study assistant"
     )
 
+    conversation_id = (
+        st.session_state.current_conversation_id
+    )
 
     # --------------------------------------------------------
-    # Display previous messages
+    # Load messages for current thread
+    # --------------------------------------------------------
+    #
+    # IMPORTANT:
+    #
+    # We don't use our own SQLite chat history anymore.
+    #
+    # LangGraph owns the conversation state.
+    #
+    # The frontend can request the thread history
+    # from the backend if that endpoint exists.
+    #
+    # For now, we maintain the displayed messages
+    # temporarily in Streamlit session state.
+    #
     # --------------------------------------------------------
 
-    for message in st.session_state.messages:
+    thread = st.session_state.chat_threads[
+        conversation_id
+    ]
+
+    if "messages" not in thread:
+
+        thread["messages"] = []
+
+
+    # --------------------------------------------------------
+    # Display conversation
+    # --------------------------------------------------------
+
+    for message in thread["messages"]:
 
         with st.chat_message(
             message["role"]
@@ -108,6 +250,29 @@ if page == "💬 Chat":
             st.markdown(
                 message["content"]
             )
+
+            # Display tool information
+            if message.get("tool_used"):
+
+                st.caption(
+                    f"🔧 Tool: "
+                    f"{message['tool_used']}"
+                )
+
+            # Display sources
+            if message.get("sources"):
+
+                with st.expander(
+                    "📚 Sources"
+                ):
+
+                    for source in message[
+                        "sources"
+                    ]:
+
+                        st.caption(
+                            f"• {source}"
+                        )
 
 
     # --------------------------------------------------------
@@ -122,16 +287,30 @@ if page == "💬 Chat":
     if user_input:
 
         # ----------------------------------------------------
+        # Update chat title
+        # ----------------------------------------------------
+
+        if thread["title"] == "New Chat":
+
+            title = user_input[:40]
+
+            if len(user_input) > 40:
+
+                title += "..."
+
+            thread["title"] = title
+
+
+        # ----------------------------------------------------
         # Display user message
         # ----------------------------------------------------
 
-        st.session_state.messages.append(
+        thread["messages"].append(
             {
                 "role": "user",
                 "content": user_input,
             }
         )
-
 
         with st.chat_message("user"):
 
@@ -141,7 +320,7 @@ if page == "💬 Chat":
 
 
         # ----------------------------------------------------
-        # Call FastAPI
+        # Call backend
         # ----------------------------------------------------
 
         try:
@@ -150,32 +329,30 @@ if page == "💬 Chat":
                 "AI is thinking..."
             ):
 
-                response = requests.post(
-                    API_URL,
-                    json={
-                        "message": user_input,
-                        "conversation_id": (
-                            st.session_state
-                            .conversation_id
-                        ),
-                    },
-                    timeout=120,
+                response = send_message(
+                    user_input
                 )
 
+
+            # ------------------------------------------------
+            # Backend error
+            # ------------------------------------------------
 
             if response.status_code != 200:
 
                 st.error(
-                    response.text
+                    f"Backend error: "
+                    f"{response.text}"
                 )
 
             else:
 
                 data = response.json()
 
-                answer = data[
-                    "response"
-                ]
+                answer = data.get(
+                    "response",
+                    "No response received.",
+                )
 
                 tool_used = data.get(
                     "tool_used"
@@ -188,6 +365,20 @@ if page == "💬 Chat":
 
 
                 # ------------------------------------------------
+                # Save assistant message
+                # ------------------------------------------------
+
+                thread["messages"].append(
+                    {
+                        "role": "assistant",
+                        "content": answer,
+                        "tool_used": tool_used,
+                        "sources": sources,
+                    }
+                )
+
+
+                # ------------------------------------------------
                 # Display assistant
                 # ------------------------------------------------
 
@@ -195,7 +386,6 @@ if page == "💬 Chat":
                     "assistant"
                 ):
 
-                    # Agent action
                     if tool_used:
 
                         st.info(
@@ -203,43 +393,49 @@ if page == "💬 Chat":
                             f"{tool_used}"
                         )
 
-
                     st.markdown(
                         answer
                     )
 
 
+                    # --------------------------------------------
                     # Sources
+                    # --------------------------------------------
+
                     if sources:
 
-                        st.markdown(
-                            "### 📚 Sources"
-                        )
+                        with st.expander(
+                            "📚 Sources"
+                        ):
 
-                        for source in sources:
+                            for source in sources:
 
-                            st.caption(
-                                f"• {source}"
-                            )
-
-
-                # ------------------------------------------------
-                # Save to frontend history
-                # ------------------------------------------------
-
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                    }
-                )
+                                st.caption(
+                                    f"• {source}"
+                                )
 
 
-        except requests.exceptions.RequestException:
+        except requests.exceptions.ConnectionError:
 
             st.error(
-                "Could not connect to FastAPI. "
-                "Make sure the backend is running."
+                "❌ Could not connect to FastAPI.\n\n"
+                "Make sure the backend is running on "
+                "http://127.0.0.1:8000"
+            )
+
+
+        except requests.exceptions.Timeout:
+
+            st.error(
+                "⏳ The request took too long. "
+                "Please try again."
+            )
+
+
+        except requests.exceptions.RequestException as e:
+
+            st.error(
+                f"❌ Request failed: {e}"
             )
 
 
@@ -247,11 +443,9 @@ if page == "💬 Chat":
 # COURSE MATERIAL PAGE
 # ============================================================
 
-elif page == "📖 Course Material":
+elif st.session_state.page == "📖 Course Material":
 
-    st.title(
-        "📖 Course Material"
-    )
+    st.title("📖 Course Material")
 
     st.info(
         "Course material is stored in the "
@@ -273,8 +467,30 @@ elif page == "📖 Course Material":
                 ↓
         Semantic Retrieval
                 ↓
+          Search Tool
+                ↓
+          LangGraph Agent
+                ↓
                LLM
+                ↓
+             Answer
         ```
+        """
+    )
+
+    st.markdown(
+        "### How the Agent Uses Course Material"
+    )
+
+    st.write(
+        """
+        When you ask a course-related question,
+        the LangGraph agent can call the
+        `search_course_material` tool.
+
+        The tool performs semantic search against
+        the existing ChromaDB and returns relevant
+        course material to the LLM.
         """
     )
 
@@ -283,16 +499,58 @@ elif page == "📖 Course Material":
 # REMINDERS PAGE
 # ============================================================
 
-elif page == "⏰ Reminders":
+elif st.session_state.page == "⏰ Reminders":
 
-    st.title(
-        "⏰ Study Reminders"
+    st.title("⏰ Study Reminders")
+
+    st.write(
+        """
+        You can create study reminders directly
+        through the AI assistant.
+        """
+    )
+
+    st.markdown(
+        "### Example"
+    )
+
+    st.code(
+        "Remind me to revise RAG tomorrow."
     )
 
     st.info(
-        "Reminder functionality can be connected "
-        "to the same agent using a create_reminder "
-        "LangChain tool."
+        """
+        The LangGraph agent decides whether the
+        `create_reminder` tool should be called.
+
+        Example flow:
+
+        User
+        ↓
+        LangGraph Agent
+        ↓
+        create_reminder()
+        ↓
+        Reminder saved
+        ↓
+        Agent response
+        """
+    )
+
+    st.markdown(
+        "### Ask the Assistant"
+    )
+
+    st.write(
+        """
+        Try asking:
+
+        • "Remind me to study embeddings tomorrow."
+
+        • "Remind me to revise LangGraph on Friday."
+
+        • "Show me my reminders."
+        """
     )
 
 
@@ -300,34 +558,79 @@ elif page == "⏰ Reminders":
 # MEMORY PAGE
 # ============================================================
 
-elif page == "🧠 Memory":
+elif st.session_state.page == "🧠 Memory":
 
-    st.title(
-        "🧠 Conversation Memory"
-    )
+    st.title("🧠 Long-Term Memory")
 
-    st.info(
-        "Conversation history is persisted in SQLite."
+    st.write(
+        """
+        The assistant can maintain important
+        information across conversations.
+        """
     )
 
     st.markdown(
-        "### Current Conversation"
+        "### What is stored?"
     )
 
-    for message in st.session_state.messages:
+    st.write(
+        """
+        The long-term memory system is intended
+        for important information such as:
 
-        role = message["role"]
+        • Study goals
 
-        content = message["content"]
+        • Learning preferences
 
-        if role == "user":
+        • Important facts shared by the student
 
-            st.markdown(
-                f"**You:** {content}"
-            )
+        • Long-term study context
+        """
+    )
 
-        else:
+    st.markdown(
+        "### Example"
+    )
 
-            st.markdown(
-                f"**AI:** {content}"
-            )
+    st.code(
+        """
+User:
+I am preparing for my LangChain interview.
+I prefer beginner-friendly explanations.
+
+↓
+
+Memory Tool
+
+↓
+
+Long-Term Memory:
+- Preparing for LangChain interview
+- Prefers beginner-friendly explanations
+        """
+    )
+
+    st.info(
+        """
+        Conversation persistence and long-term
+        memory are two different things.
+
+        LangGraph persistence:
+        → preserves conversation/thread state.
+
+        Long-term memory:
+        → preserves important information
+          across conversations.
+        """
+    )
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.sidebar.divider()
+
+st.sidebar.caption(
+    "AI Study Assistant • LangChain + LangGraph + FastAPI"
+)

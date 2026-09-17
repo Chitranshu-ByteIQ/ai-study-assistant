@@ -5,14 +5,13 @@ from backend.models import (
     ChatResponse,
     ThreadCreateRequest,
     ThreadResponse,
-    MessageResponse,
 )
 
 from backend.agent import graph
 
 from backend.memory import (
     create_thread,
-    get_threads,
+    get_all_threads,
     get_thread,
     get_history,
     get_messages,
@@ -60,7 +59,7 @@ async def create_new_thread(
 )
 async def list_threads():
 
-    return get_threads()
+    return get_all_threads()
 
 
 # ============================================================

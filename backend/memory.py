@@ -277,6 +277,67 @@ def get_messages(conversation_id: str):
         for row in rows
     ]
 
+# ============================================================
+# GET ALL THREADS
+# ============================================================
+
+def get_all_threads():
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, title, created_at
+        FROM threads
+        ORDER BY created_at DESC
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return [
+        {
+            "conversation_id": row[0],
+            "title": row[1],
+            "created_at": row[2],
+        }
+        for row in rows
+    ]
+
+
+# ============================================================
+# GET SINGLE THREAD
+# ============================================================
+
+def get_thread(conversation_id: str):
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id, title, created_at
+        FROM threads
+        WHERE id = ?
+        """,
+        (conversation_id,),
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    if row is None:
+        return None
+
+    return {
+        "conversation_id": row[0],
+        "title": row[1],
+        "created_at": row[2],
+    }
 
 # ============================================================
 # DELETE THREAD
