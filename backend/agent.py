@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, TypedDict
 
 from langchain_groq import ChatGroq
@@ -19,7 +20,15 @@ from langgraph.graph.message import (
 from langgraph.prebuilt import ToolNode
 
 from backend.config import settings
-from backend.tools import search_course_material
+from backend.long_term_memory import store_extracted_memories
+from backend.tools import (
+    complete_reminder,
+    create_reminder,
+    delete_reminder,
+    get_reminders,
+    search_course_material,
+    update_reminder,
+)
 
 
 # ============================================================
@@ -34,6 +43,10 @@ class AgentState(TypedDict):
     ]
 
     iteration: int
+
+    user_id: str | None
+
+    memory_context: str
 
 
 # ============================================================
@@ -52,7 +65,12 @@ llm = ChatGroq(
 # ============================================================
 
 tools = [
-    search_course_material
+    search_course_material,
+    create_reminder,
+    get_reminders,
+    update_reminder,
+    delete_reminder,
+    complete_reminder,
 ]
 
 
@@ -71,6 +89,14 @@ You help students understand their course material.
 You have access to this tool:
 
 search_course_material(query)
+
+You also have reminder tools for the active conversation:
+
+- create_reminder(reminder_text, due_at)
+- get_reminders(status)
+- update_reminder(reminder_id, reminder_text, due_at, status)
+- delete_reminder(reminder_id)
+- complete_reminder(reminder_id)
 
 --------------------------------------------------
 WHEN TO USE THE TOOL
@@ -130,6 +156,32 @@ say:
 "I don't know based on the provided course material."
 
 Be clear and beginner friendly.
+
+--------------------------------------------------
+REMINDERS
+--------------------------------------------------
+
+Use reminder tools for requests to create, list, change, complete, or delete
+study reminders. Do not use search_course_material for reminder operations.
+
+For create or reschedule operations, pass a complete ISO 8601 datetime to the
+tool. The current server-local timestamp is supplied in the system message.
+Convert clear relative dates such as "tomorrow at 7 PM" using that timestamp.
+If the user did not provide enough date/time information, ask a clarification
+question instead of creating a reminder. There is no notification scheduler:
+reminders are records that become overdue when queried after their due time.
+
+When a user refers to a reminder without its ID, first call get_reminders to
+identify the reminder, then use its returned ID with the requested tool.
+
+--------------------------------------------------
+LONG-TERM MEMORY
+--------------------------------------------------
+
+Relevant long-term memory, when available, is included in the system context.
+Use it to answer questions about the user across separate conversations. Treat
+it as user-provided context, not course material. Do not claim to remember a
+fact that is absent from the supplied memory context.
 """
 
 
@@ -143,8 +195,13 @@ def agent_node(
 
     messages = state["messages"]
 
+    current_time = datetime.now().astimezone().replace(microsecond=0).isoformat()
+    memory_context = state.get("memory_context", "")
     system_message = SystemMessage(
-        content=SYSTEM_PROMPT
+        content=(
+            f"{SYSTEM_PROMPT}\n\nCurrent server-local timestamp: {current_time}"
+            f"\n\n{memory_context}"
+        )
     )
 
     response = llm_with_tools.invoke(
@@ -171,6 +228,29 @@ tool_node = ToolNode(tools)
 
 
 # ============================================================
+# LONG-TERM MEMORY NODE
+# ============================================================
+
+def memory_node(state: AgentState):
+    """Persist explicit durable facts after a completed agent turn."""
+    user_id = state.get("user_id")
+
+    if not user_id:
+        return {}
+
+    user_messages = [
+        message
+        for message in state["messages"]
+        if getattr(message, "type", None) == "human"
+    ]
+
+    if user_messages:
+        store_extracted_memories(user_id, str(user_messages[-1].content))
+
+    return {}
+
+
+# ============================================================
 # ROUTER
 # ============================================================
 
@@ -188,7 +268,7 @@ def should_continue(
 
     if state.get("iteration", 0) >= 3:
 
-        return "end"
+        return "memory"
 
     # --------------------------------------------------------
     # If LLM requested a tool
@@ -206,7 +286,7 @@ def should_continue(
     # Otherwise final answer
     # --------------------------------------------------------
 
-    return "end"
+    return "memory"
 
 
 # ============================================================
@@ -229,6 +309,11 @@ workflow.add_node(
     tool_node,
 )
 
+workflow.add_node(
+    "memory",
+    memory_node,
+)
+
 
 workflow.set_entry_point(
     "agent"
@@ -240,7 +325,7 @@ workflow.add_conditional_edges(
     should_continue,
     {
         "tools": "tools",
-        "end": END,
+        "memory": "memory",
     },
 )
 
@@ -248,6 +333,11 @@ workflow.add_conditional_edges(
 workflow.add_edge(
     "tools",
     "agent",
+)
+
+workflow.add_edge(
+    "memory",
+    END,
 )
 
 

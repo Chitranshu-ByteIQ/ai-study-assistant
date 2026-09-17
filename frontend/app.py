@@ -1,636 +1,265 @@
+from datetime import datetime
 import uuid
 
 import requests
 import streamlit as st
 
 
-# ============================================================
-# CONFIG
-# ============================================================
-
 API_URL = "http://127.0.0.1:8000"
 
+st.set_page_config(page_title="AI Study Assistant", page_icon="📚", layout="wide")
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
-
-st.set_page_config(
-    page_title="AI Study Assistant",
-    page_icon="📚",
-    layout="wide",
-)
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-# All chat threads known to the frontend
-if "chat_threads" not in st.session_state:
-    st.session_state.chat_threads = {}
-
-
-# Current active conversation
+if "user_id" not in st.session_state:
+    st.session_state.user_id = str(uuid.uuid4())
 if "current_conversation_id" not in st.session_state:
-    conversation_id = str(uuid.uuid4())
-
-    st.session_state.current_conversation_id = conversation_id
-
-    st.session_state.chat_threads[conversation_id] = {
-        "title": "New Chat",
-    }
-
-
-# Current page
+    st.session_state.current_conversation_id = None
 if "page" not in st.session_state:
     st.session_state.page = "💬 Chat"
 
 
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
+def headers() -> dict:
+    return {"X-User-ID": st.session_state.user_id}
 
 
-def create_new_chat():
-    """
-    Create a new conversation/thread.
-    """
-
-    conversation_id = str(uuid.uuid4())
-
-    st.session_state.chat_threads[conversation_id] = {
-        "title": "New Chat",
-    }
-
-    st.session_state.current_conversation_id = conversation_id
+def request_api(method: str, path: str, **kwargs):
+    kwargs.setdefault("headers", headers())
+    kwargs.setdefault("timeout", 120)
+    return requests.request(method, f"{API_URL}{path}", **kwargs)
 
 
-def get_current_conversation_id():
-    """
-    Return the active LangGraph thread ID.
-    """
-
-    return st.session_state.current_conversation_id
+def get_threads() -> list[dict]:
+    response = request_api("GET", "/chat/threads")
+    response.raise_for_status()
+    return response.json()
 
 
-def send_message(message: str):
-    """
-    Send the user's message to FastAPI.
-    """
+def create_thread() -> dict:
+    response = request_api("POST", "/chat/threads", json={"title": "New Chat"})
+    response.raise_for_status()
+    return response.json()
 
-    conversation_id = get_current_conversation_id()
 
-    response = requests.post(
-        f"{API_URL}/chat/",
-        json={
-            "message": message,
-            "conversation_id": conversation_id,
-        },
-        timeout=120,
+def get_thread(conversation_id: str) -> dict:
+    response = request_api("GET", f"/chat/threads/{conversation_id}")
+    response.raise_for_status()
+    return response.json()
+
+
+def delete_thread(conversation_id: str) -> None:
+    response = request_api("DELETE", f"/chat/threads/{conversation_id}")
+    response.raise_for_status()
+
+
+def send_chat_message(conversation_id: str, message: str) -> dict:
+    response = request_api(
+        "POST",
+        "/chat/",
+        json={"conversation_id": conversation_id, "message": message},
     )
+    response.raise_for_status()
+    return response.json()
 
-    return response
+
+def get_memories() -> list[dict]:
+    response = request_api("GET", "/memory")
+    response.raise_for_status()
+    return response.json()
 
 
-# ============================================================
-# SIDEBAR
-# ============================================================
+def forget_memory(memory_id: str) -> None:
+    response = request_api("DELETE", f"/memory/{memory_id}")
+    response.raise_for_status()
+
+
+def get_reminders(conversation_id: str | None = None) -> list[dict]:
+    params = {"conversation_id": conversation_id} if conversation_id else None
+    response = request_api("GET", "/reminders", params=params)
+    response.raise_for_status()
+    return response.json()
+
+
+def create_reminder(conversation_id: str, text: str, due_at: datetime) -> None:
+    response = request_api(
+        "POST",
+        "/reminders",
+        json={"conversation_id": conversation_id, "reminder_text": text, "due_at": due_at.isoformat()},
+    )
+    response.raise_for_status()
+
+
+def update_reminder(reminder_id: str, payload: dict) -> None:
+    response = request_api("PATCH", f"/reminders/{reminder_id}", json=payload)
+    response.raise_for_status()
+
+
+def complete_reminder(reminder_id: str) -> None:
+    response = request_api("POST", f"/reminders/{reminder_id}/complete")
+    response.raise_for_status()
+
+
+def delete_reminder(reminder_id: str) -> None:
+    response = request_api("DELETE", f"/reminders/{reminder_id}")
+    response.raise_for_status()
+
+
+def api_error(error: Exception) -> None:
+    st.error(f"Backend request failed: {error}")
+
+
+try:
+    threads = get_threads()
+except requests.RequestException as error:
+    threads = []
+    backend_error = error
+else:
+    backend_error = None
 
 with st.sidebar:
-
     st.title("📚 AI Study Assistant")
+    if st.button("➕ New Chat", use_container_width=True):
+        try:
+            thread = create_thread()
+            st.session_state.current_conversation_id = thread["conversation_id"]
+            st.session_state.page = "💬 Chat"
+            st.rerun()
+        except requests.RequestException as error:
+            api_error(error)
 
     st.divider()
-
-    # --------------------------------------------------------
-    # NEW CHAT
-    # --------------------------------------------------------
-
-    if st.button(
-        "➕ New Chat",
-        use_container_width=True,
-    ):
-
-        create_new_chat()
-
-        st.rerun()
+    st.markdown("### Conversations")
+    for thread in threads:
+        is_active = thread["conversation_id"] == st.session_state.current_conversation_id
+        label = f"🟢 {thread['title']}" if is_active else f"💬 {thread['title']}"
+        if st.button(label, key=f"thread_{thread['conversation_id']}", use_container_width=True):
+            st.session_state.current_conversation_id = thread["conversation_id"]
+            st.session_state.page = "💬 Chat"
+            st.rerun()
 
     st.divider()
-
-    # --------------------------------------------------------
-    # CHAT THREADS
-    # --------------------------------------------------------
-
-    st.markdown("### 💬 Conversations")
-
-    if st.session_state.chat_threads:
-
-        for conversation_id, chat in list(
-            st.session_state.chat_threads.items()
-        ):
-
-            title = chat.get(
-                "title",
-                "New Chat",
-            )
-
-            is_current = (
-                conversation_id
-                == st.session_state.current_conversation_id
-            )
-
-            button_label = (
-                f"🟢 {title}"
-                if is_current
-                else f"💬 {title}"
-            )
-
-            if st.button(
-                button_label,
-                key=f"chat_{conversation_id}",
-                use_container_width=True,
-            ):
-
-                st.session_state.current_conversation_id = (
-                    conversation_id
-                )
-
-                st.session_state.page = "💬 Chat"
-
-                st.rerun()
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # NAVIGATION
-    # --------------------------------------------------------
-
-    st.markdown("### Navigation")
-
-    page = st.radio(
+    st.session_state.page = st.radio(
         "Navigation",
-        [
-            "💬 Chat",
-            "📖 Course Material",
-            "⏰ Reminders",
-            "🧠 Memory",
-        ],
+        ["🧠 Memory", "🔔 Reminders", "💬 Chat"],
+        index=["🧠 Memory", "🔔 Reminders", "💬 Chat"].index(st.session_state.page),
         label_visibility="collapsed",
     )
+    st.caption("Memories are scoped to this browser session's user ID.")
 
-    st.session_state.page = page
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # CURRENT THREAD
-    # --------------------------------------------------------
-
-    st.markdown("### Current Thread")
-
-    st.caption(
-        st.session_state.current_conversation_id
-    )
+if backend_error:
+    st.warning("The backend is unavailable. Start FastAPI at http://127.0.0.1:8000.")
 
 
-# ============================================================
-# CHAT PAGE
-# ============================================================
+if st.session_state.page == "🧠 Memory":
+    st.title("🧠 Long-Term Memory")
+    st.caption("Things the assistant has learned about you across conversations.")
+    try:
+        memories = get_memories()
+    except requests.RequestException as error:
+        api_error(error)
+        memories = []
 
-if st.session_state.page == "💬 Chat":
-
-    st.title("AI Study Assistant")
-
-    st.caption(
-        "Your personal course & study assistant"
-    )
-
-    conversation_id = (
-        st.session_state.current_conversation_id
-    )
-
-    # --------------------------------------------------------
-    # Load messages for current thread
-    # --------------------------------------------------------
-    #
-    # IMPORTANT:
-    #
-    # We don't use our own SQLite chat history anymore.
-    #
-    # LangGraph owns the conversation state.
-    #
-    # The frontend can request the thread history
-    # from the backend if that endpoint exists.
-    #
-    # For now, we maintain the displayed messages
-    # temporarily in Streamlit session state.
-    #
-    # --------------------------------------------------------
-
-    thread = st.session_state.chat_threads[
-        conversation_id
-    ]
-
-    if "messages" not in thread:
-
-        thread["messages"] = []
+    if not memories:
+        st.info("No long-term memories yet. Tell the assistant your name, preferences, learning focus, or study goals.")
+    for memory in memories:
+        with st.container(border=True):
+            st.markdown(f"#### {memory['key'].replace('_', ' ').title()}")
+            st.write(memory["value"])
+            st.caption(memory["category"].title())
+            if st.button("Forget", key=f"forget_{memory['id']}"):
+                try:
+                    forget_memory(memory["id"])
+                    st.rerun()
+                except requests.RequestException as error:
+                    api_error(error)
 
 
-    # --------------------------------------------------------
-    # Display conversation
-    # --------------------------------------------------------
-
-    for message in thread["messages"]:
-
-        with st.chat_message(
-            message["role"]
-        ):
-
-            st.markdown(
-                message["content"]
-            )
-
-            # Display tool information
-            if message.get("tool_used"):
-
-                st.caption(
-                    f"🔧 Tool: "
-                    f"{message['tool_used']}"
-                )
-
-            # Display sources
-            if message.get("sources"):
-
-                with st.expander(
-                    "📚 Sources"
-                ):
-
-                    for source in message[
-                        "sources"
-                    ]:
-
-                        st.caption(
-                            f"• {source}"
-                        )
-
-
-    # --------------------------------------------------------
-    # Chat input
-    # --------------------------------------------------------
-
-    user_input = st.chat_input(
-        "Ask anything about your course..."
-    )
-
-
-    if user_input:
-
-        # ----------------------------------------------------
-        # Update chat title
-        # ----------------------------------------------------
-
-        if thread["title"] == "New Chat":
-
-            title = user_input[:40]
-
-            if len(user_input) > 40:
-
-                title += "..."
-
-            thread["title"] = title
-
-
-        # ----------------------------------------------------
-        # Display user message
-        # ----------------------------------------------------
-
-        thread["messages"].append(
-            {
-                "role": "user",
-                "content": user_input,
-            }
-        )
-
-        with st.chat_message("user"):
-
-            st.markdown(
-                user_input
-            )
-
-
-        # ----------------------------------------------------
-        # Call backend
-        # ----------------------------------------------------
+elif st.session_state.page == "🔔 Reminders":
+    st.title("🔔 Study Reminders")
+    conversation_id = st.session_state.current_conversation_id
+    if not conversation_id:
+        st.info("Create or select a chat first. Reminders belong to a conversation.")
+    else:
+        with st.form("create_reminder"):
+            reminder_text = st.text_input("What should you study?")
+            due_date = st.date_input("Due date")
+            due_time = st.time_input("Due time")
+            submitted = st.form_submit_button("Create reminder")
+        if submitted:
+            try:
+                create_reminder(conversation_id, reminder_text, datetime.combine(due_date, due_time))
+                st.rerun()
+            except requests.RequestException as error:
+                api_error(error)
 
         try:
-
-            with st.spinner(
-                "AI is thinking..."
-            ):
-
-                response = send_message(
-                    user_input
-                )
-
-
-            # ------------------------------------------------
-            # Backend error
-            # ------------------------------------------------
-
-            if response.status_code != 200:
-
-                st.error(
-                    f"Backend error: "
-                    f"{response.text}"
-                )
-
-            else:
-
-                data = response.json()
-
-                answer = data.get(
-                    "response",
-                    "No response received.",
-                )
-
-                tool_used = data.get(
-                    "tool_used"
-                )
-
-                sources = data.get(
-                    "sources",
-                    [],
-                )
-
-
-                # ------------------------------------------------
-                # Save assistant message
-                # ------------------------------------------------
-
-                thread["messages"].append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                        "tool_used": tool_used,
-                        "sources": sources,
-                    }
-                )
-
-
-                # ------------------------------------------------
-                # Display assistant
-                # ------------------------------------------------
-
-                with st.chat_message(
-                    "assistant"
-                ):
-
-                    if tool_used:
-
-                        st.info(
-                            f"🔧 Tool used: "
-                            f"{tool_used}"
-                        )
-
-                    st.markdown(
-                        answer
-                    )
-
-
-                    # --------------------------------------------
-                    # Sources
-                    # --------------------------------------------
-
-                    if sources:
-
-                        with st.expander(
-                            "📚 Sources"
-                        ):
-
-                            for source in sources:
-
-                                st.caption(
-                                    f"• {source}"
-                                )
-
-
-        except requests.exceptions.ConnectionError:
-
-            st.error(
-                "❌ Could not connect to FastAPI.\n\n"
-                "Make sure the backend is running on "
-                "http://127.0.0.1:8000"
-            )
-
-
-        except requests.exceptions.Timeout:
-
-            st.error(
-                "⏳ The request took too long. "
-                "Please try again."
-            )
-
-
-        except requests.exceptions.RequestException as e:
-
-            st.error(
-                f"❌ Request failed: {e}"
-            )
-
-
-# ============================================================
-# COURSE MATERIAL PAGE
-# ============================================================
-
-elif st.session_state.page == "📖 Course Material":
-
-    st.title("📖 Course Material")
-
-    st.info(
-        "Course material is stored in the "
-        "persistent Chroma vector database."
-    )
-
-    st.markdown(
-        """
-        ### RAG Pipeline
-
-        ```text
-        Course .txt files
-                ↓
-             Chunking
-                ↓
-            Embeddings
-                ↓
-             ChromaDB
-                ↓
-        Semantic Retrieval
-                ↓
-          Search Tool
-                ↓
-          LangGraph Agent
-                ↓
-               LLM
-                ↓
-             Answer
-        ```
-        """
-    )
-
-    st.markdown(
-        "### How the Agent Uses Course Material"
-    )
-
-    st.write(
-        """
-        When you ask a course-related question,
-        the LangGraph agent can call the
-        `search_course_material` tool.
-
-        The tool performs semantic search against
-        the existing ChromaDB and returns relevant
-        course material to the LLM.
-        """
-    )
-
-
-# ============================================================
-# REMINDERS PAGE
-# ============================================================
-
-elif st.session_state.page == "⏰ Reminders":
-
-    st.title("⏰ Study Reminders")
-
-    st.write(
-        """
-        You can create study reminders directly
-        through the AI assistant.
-        """
-    )
-
-    st.markdown(
-        "### Example"
-    )
-
-    st.code(
-        "Remind me to revise RAG tomorrow."
-    )
-
-    st.info(
-        """
-        The LangGraph agent decides whether the
-        `create_reminder` tool should be called.
-
-        Example flow:
-
-        User
-        ↓
-        LangGraph Agent
-        ↓
-        create_reminder()
-        ↓
-        Reminder saved
-        ↓
-        Agent response
-        """
-    )
-
-    st.markdown(
-        "### Ask the Assistant"
-    )
-
-    st.write(
-        """
-        Try asking:
-
-        • "Remind me to study embeddings tomorrow."
-
-        • "Remind me to revise LangGraph on Friday."
-
-        • "Show me my reminders."
-        """
-    )
-
-
-# ============================================================
-# MEMORY PAGE
-# ============================================================
-
-elif st.session_state.page == "🧠 Memory":
-
-    st.title("🧠 Long-Term Memory")
-
-    st.write(
-        """
-        The assistant can maintain important
-        information across conversations.
-        """
-    )
-
-    st.markdown(
-        "### What is stored?"
-    )
-
-    st.write(
-        """
-        The long-term memory system is intended
-        for important information such as:
-
-        • Study goals
-
-        • Learning preferences
-
-        • Important facts shared by the student
-
-        • Long-term study context
-        """
-    )
-
-    st.markdown(
-        "### Example"
-    )
-
-    st.code(
-        """
-User:
-I am preparing for my LangChain interview.
-I prefer beginner-friendly explanations.
-
-↓
-
-Memory Tool
-
-↓
-
-Long-Term Memory:
-- Preparing for LangChain interview
-- Prefers beginner-friendly explanations
-        """
-    )
-
-    st.info(
-        """
-        Conversation persistence and long-term
-        memory are two different things.
-
-        LangGraph persistence:
-        → preserves conversation/thread state.
-
-        Long-term memory:
-        → preserves important information
-          across conversations.
-        """
-    )
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.sidebar.divider()
-
-st.sidebar.caption(
-    "AI Study Assistant • LangChain + LangGraph + FastAPI"
-)
+            reminders = get_reminders(conversation_id)
+        except requests.RequestException as error:
+            api_error(error)
+            reminders = []
+        if not reminders:
+            st.info("No reminders for this conversation.")
+        for reminder in reminders:
+            with st.container(border=True):
+                st.markdown(f"#### {reminder['reminder_text']}")
+                st.caption(f"Due: {reminder['due_at']} · Status: {reminder['status'].title()}")
+                left, middle, _ = st.columns(3)
+                if reminder["status"] not in {"completed", "cancelled"} and left.button("Complete", key=f"complete_{reminder['id']}"):
+                    try:
+                        complete_reminder(reminder["id"])
+                        st.rerun()
+                    except requests.RequestException as error:
+                        api_error(error)
+                if middle.button("Delete", key=f"delete_{reminder['id']}"):
+                    try:
+                        delete_reminder(reminder["id"])
+                        st.rerun()
+                    except requests.RequestException as error:
+                        api_error(error)
+                with st.expander("Edit"):
+                    new_text = st.text_input("Reminder", value=reminder["reminder_text"], key=f"text_{reminder['id']}")
+                    new_status = st.selectbox("Status", ["pending", "completed", "cancelled"], key=f"status_{reminder['id']}")
+                    if st.button("Save changes", key=f"save_{reminder['id']}"):
+                        try:
+                            update_reminder(reminder["id"], {"reminder_text": new_text, "status": new_status})
+                            st.rerun()
+                        except requests.RequestException as error:
+                            api_error(error)
+
+
+else:
+    st.title("💬 AI Study Assistant")
+    st.caption("Ask about your course, study reminders, or what the assistant remembers about you.")
+    conversation_id = st.session_state.current_conversation_id
+    if not conversation_id:
+        st.info("Create a new chat to begin.")
+    else:
+        try:
+            messages = get_thread(conversation_id)["messages"]
+        except requests.RequestException as error:
+            api_error(error)
+            messages = []
+        for message in messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        if st.button("Delete this chat", type="secondary"):
+            try:
+                delete_thread(conversation_id)
+                st.session_state.current_conversation_id = None
+                st.rerun()
+            except requests.RequestException as error:
+                api_error(error)
+
+        prompt = st.chat_input("Ask anything about your course...")
+        if prompt:
+            try:
+                with st.spinner("AI is thinking..."):
+                    result = send_chat_message(conversation_id, prompt)
+                if result.get("tool_used"):
+                    st.caption(f"Tool used: {result['tool_used']}")
+                if result.get("sources"):
+                    with st.expander("Sources"):
+                        for source in result["sources"]:
+                            st.write(source)
+                st.rerun()
+            except requests.RequestException as error:
+                api_error(error)

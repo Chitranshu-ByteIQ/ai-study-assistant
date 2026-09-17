@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Header, HTTPException
 
 from backend.models import (
     ChatRequest,
@@ -8,6 +10,10 @@ from backend.models import (
 )
 
 from backend.agent import graph
+from backend.tools import (
+    reset_active_conversation,
+    set_active_conversation,
+)
 
 from backend.memory import (
     create_thread,
@@ -18,12 +24,24 @@ from backend.memory import (
     save_message,
     delete_thread,
 )
+from backend.long_term_memory import (
+    format_memory_context,
+    get_relevant_memories,
+)
 
 
 router = APIRouter(
     prefix="/chat",
     tags=["Chat"],
 )
+
+UserIdHeader = Annotated[
+    str | None,
+    Header(
+        alias="X-User-ID",
+        description="Optional stable user identifier used for cross-thread long-term memory.",
+    ),
+]
 
 
 # ============================================================
@@ -33,6 +51,8 @@ router = APIRouter(
 @router.post(
     "/threads",
     response_model=ThreadResponse,
+    summary="Create a chat thread",
+    description="Create a conversation before sending messages to POST /chat/.",
 )
 async def create_new_thread(
     request: ThreadCreateRequest,
@@ -56,6 +76,7 @@ async def create_new_thread(
 @router.get(
     "/threads",
     response_model=list[ThreadResponse],
+    summary="List chat threads",
 )
 async def list_threads():
 
@@ -68,6 +89,8 @@ async def list_threads():
 
 @router.get(
     "/threads/{conversation_id}",
+    summary="Get a thread and its persisted messages",
+    responses={404: {"description": "Conversation not found"}},
 )
 async def resume_thread(
     conversation_id: str,
@@ -100,6 +123,8 @@ async def resume_thread(
 
 @router.delete(
     "/threads/{conversation_id}",
+    summary="Delete a chat thread",
+    responses={404: {"description": "Conversation not found"}},
 )
 async def remove_thread(
     conversation_id: str,
@@ -129,9 +154,13 @@ async def remove_thread(
 @router.post(
     "/",
     response_model=ChatResponse,
+    summary="Send a message to a chat thread",
+    description="Loads thread history, adds relevant long-term memory for X-User-ID, then invokes the LangGraph agent.",
+    responses={404: {"description": "Conversation not found"}},
 )
 async def chat(
     request: ChatRequest,
+    user_id: UserIdHeader = None,
 ):
 
     try:
@@ -159,6 +188,12 @@ async def chat(
             request.conversation_id
         )
 
+        memory_context = ""
+        if user_id:
+            memory_context = format_memory_context(
+                get_relevant_memories(user_id, request.message)
+            )
+
         # ----------------------------------------------------
         # Add current user message
         # ----------------------------------------------------
@@ -174,12 +209,21 @@ async def chat(
         # Run LangGraph
         # ----------------------------------------------------
 
-        result = graph.invoke(
-            {
-                "messages": messages,
-                "iteration": 0,
-            }
+        conversation_token = set_active_conversation(
+            request.conversation_id
         )
+
+        try:
+            result = graph.invoke(
+                {
+                    "messages": messages,
+                    "iteration": 0,
+                    "user_id": user_id,
+                    "memory_context": memory_context,
+                }
+            )
+        finally:
+            reset_active_conversation(conversation_token)
 
         # ----------------------------------------------------
         # Get final response

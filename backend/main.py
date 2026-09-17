@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 
 from backend.routes.chat import router as chat_router
+from backend.routes.reminders import router as reminder_router
+from backend.routes.memory import router as memory_router
 
 
 app = FastAPI(
@@ -20,6 +22,14 @@ app = FastAPI(
 
 app.include_router(
     chat_router
+)
+
+app.include_router(
+    reminder_router
+)
+
+app.include_router(
+    memory_router
 )
 
 

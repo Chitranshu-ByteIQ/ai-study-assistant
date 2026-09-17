@@ -348,6 +348,15 @@ def delete_thread(conversation_id: str):
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Delete reminders first. Reminders are scoped to their chat thread.
+    cursor.execute(
+        """
+        DELETE FROM reminders
+        WHERE conversation_id = ?
+        """,
+        (conversation_id,),
+    )
+
     # Delete messages first
     cursor.execute(
         """
@@ -380,3 +389,11 @@ def delete_thread(conversation_id: str):
 # ============================================================
 
 init_db()
+
+
+# Initialize reminder storage with the existing chat database at startup.
+from backend.reminders import init_reminders_db
+from backend.long_term_memory import init_long_term_memory_db
+
+init_reminders_db()
+init_long_term_memory_db()
