@@ -1,0 +1,18 @@
+Vector Databases
+
+A vector database stores and searches vector representations such as text embeddings. It allows an application to retrieve items whose vectors are similar to a query vector.
+
+A typical semantic-search workflow is:
+
+1. Split documents into useful pieces.
+2. Generate an embedding for each piece.
+3. Store the embeddings with their source text and metadata.
+4. Convert a user query into an embedding.
+5. Search for nearby vectors.
+6. Return the most relevant text.
+
+Vector databases are useful when an application needs to search a large collection using semantic similarity rather than exact keyword matches.
+
+A record in a vector store often contains the vector, the original text, and metadata such as a document name or identifier.
+
+The vector database does not normally generate the final natural-language answer. It retrieves relevant information, which can then be passed to an LLM.

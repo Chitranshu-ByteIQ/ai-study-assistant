@@ -1,0 +1,17 @@
+Conversation Memory
+
+Conversation memory allows an AI application to use information from earlier messages in the same interaction.
+
+For example:
+
+User: "My exam is about RAG and agents."
+Assistant: "Got it."
+User: "What topics did I mention?"
+
+The assistant can answer from the conversation history without searching an external knowledge base.
+
+Short-term conversation memory usually consists of recent messages or a selected summary of the interaction. The history can be included in the model context for later turns.
+
+Memory and RAG solve different problems. Memory helps the assistant remember the conversation. RAG helps the assistant retrieve information from an external collection of documents.
+
+Applications should also consider context size and relevance. Keeping every previous message forever may make the prompt unnecessarily large, so systems may truncate, summarize, or selectively retain history.

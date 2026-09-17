@@ -1,0 +1,21 @@
+ReAct: Reasoning and Acting
+
+ReAct is a pattern for combining model reasoning with actions. The model decides what to do, calls a tool, observes the result, and can then decide what to do next.
+
+A simplified loop is:
+
+User
+-> model decision
+-> action
+-> observation
+-> model decision
+-> final answer
+
+For example, a user may ask:
+"Explain RAG and remind me to revise it tomorrow."
+
+The agent could first search the course material for RAG, observe the retrieved information, and then create a reminder. After the tool results are available, it produces a final response.
+
+The important concept is that tool results can influence the next decision. This is different from a fixed pipeline where every request always follows exactly the same sequence.
+
+A practical agent should have limits such as a maximum number of tool iterations. This helps prevent unnecessary loops and keeps execution predictable.

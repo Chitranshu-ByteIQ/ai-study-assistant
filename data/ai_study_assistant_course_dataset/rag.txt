@@ -1,0 +1,21 @@
+Retrieval-Augmented Generation (RAG)
+
+Retrieval-Augmented Generation is a pattern in which an application retrieves relevant external information and provides that information to an LLM before generating an answer.
+
+A basic RAG flow is:
+
+User question
+-> create query embedding
+-> retrieve relevant document chunks
+-> place retrieved text in the prompt
+-> LLM generates an answer
+
+The main purpose of RAG is to give the model access to information that may not be present in its built-in knowledge or that is specific to an application.
+
+For example, a university assistant can retrieve lecture notes before answering a question about a course.
+
+RAG usually has two major stages. The retrieval stage finds relevant information. The generation stage uses the retrieved information to produce the response.
+
+Good retrieval does not automatically guarantee a good answer. Poor chunking, weak embeddings, irrelevant search results, or missing information can reduce answer quality.
+
+RAG is different from conversation memory. RAG retrieves knowledge from an external collection, while conversation memory keeps track of information from an interaction.

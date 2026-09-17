@@ -1,0 +1,22 @@
+Embeddings
+
+An embedding is a numerical representation of information. Text is converted into a vector containing numbers that capture useful semantic relationships learned by an embedding model.
+
+For example, sentences such as:
+"How do embeddings work?"
+and
+"Explain text embeddings"
+may have vectors that are closer to each other than vectors for an unrelated sentence about cooking.
+
+Similarity between embeddings can be used to find semantically related text. A common similarity measure is cosine similarity, which compares the direction of two vectors.
+
+A simplified workflow is:
+
+Text
+-> embedding model
+-> vector
+-> similarity comparison
+
+Embeddings are commonly used in semantic search, document retrieval, recommendation systems, clustering, and duplicate detection.
+
+An embedding is not the original text. It is a numerical representation that can be stored and compared. The quality of retrieval depends on the embedding model, the text being embedded, and the similarity method used.

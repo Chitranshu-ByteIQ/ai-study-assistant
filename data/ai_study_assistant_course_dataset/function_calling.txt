@@ -1,0 +1,21 @@
+Function Calling
+
+Function calling allows an LLM application to connect the model to application-defined functions or tools.
+
+A tool can expose a name, description, and expected arguments. For example:
+
+create_reminder(task, date)
+
+When a user asks:
+"Remind me to study RAG tomorrow."
+
+the model can determine that a reminder tool is appropriate and produce structured arguments such as:
+
+task = "Study RAG"
+date = "tomorrow"
+
+The application then validates the arguments, executes the function, and sends the result back to the model when needed.
+
+Function calling is useful for actions that an LLM should not perform only through generated text. Examples include searching a database, creating a reminder, checking an order, or retrieving information from an API.
+
+A tool call is not the same as the final user answer. The tool performs an operation and returns an observation or result that the application can use to continue the interaction.

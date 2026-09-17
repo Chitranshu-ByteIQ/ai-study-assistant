@@ -1,0 +1,18 @@
+AI Agents
+
+An AI agent is an LLM-based system that can decide what action to take next in order to complete a task. Instead of following one fixed sequence for every request, the agent can select among available tools based on the current situation.
+
+A simple agent loop looks like:
+
+User request
+-> LLM decides
+-> tool or action
+-> tool result
+-> LLM decides again
+-> final answer
+
+For example, an AI study assistant might decide to search course material for a knowledge question, create a reminder for a study task, or answer directly using the current conversation.
+
+The key idea is decision-making around actions. A tool-using agent needs clear tool definitions, controlled execution, and limits that prevent unnecessary or endless actions.
+
+Not every request requires a tool. A good agent should choose an available capability only when it is relevant to the user's request.

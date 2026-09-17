@@ -1,0 +1,15 @@
+Prompt Engineering
+
+Prompt engineering is the practice of designing instructions and context so that an LLM is more likely to produce the desired output.
+
+A useful prompt normally makes the task clear and provides the information the model needs. It can specify the role of the assistant, the task to perform, relevant context, constraints, and the expected output format.
+
+For example, instead of asking:
+"Explain RAG."
+
+A more specific prompt could say:
+"Explain RAG to a beginner in five bullet points. Define retrieval, explain why external context is used, and include one simple example."
+
+Common prompt techniques include giving direct instructions, providing examples, requesting structured output, and clearly defining constraints.
+
+Prompt engineering does not guarantee that a model will always be correct. Clear prompts can improve consistency, but applications may still need retrieval, validation, tools, and error handling.

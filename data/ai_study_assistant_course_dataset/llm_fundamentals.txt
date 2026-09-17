@@ -1,0 +1,11 @@
+Large Language Models (LLMs)
+
+A Large Language Model is a machine-learning model trained on large amounts of text so that it can understand and generate language. An LLM receives text as input and predicts a useful continuation or response based on patterns learned during training.
+
+LLMs work with tokens rather than individual words. A token may represent a complete word, part of a word, punctuation, or another piece of text. The model processes a sequence of tokens and produces probabilities for possible next tokens.
+
+LLMs are useful for tasks such as question answering, summarization, classification, translation, code generation, and conversational assistance.
+
+An important limitation is that an LLM does not automatically have access to every piece of information a user expects. Its answer depends on its training, the information included in the current context, and the tools available to it. An LLM can also produce an answer that sounds convincing but is incorrect.
+
+In an AI application, the LLM is often one component rather than the entire system. Other components can provide external knowledge, memory, tools, validation, or application-specific logic.
